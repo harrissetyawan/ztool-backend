@@ -1,6 +1,14 @@
 // This file should be at: /api/search.js
+// This is the COMPLETE version with all analysis logic included.
 
-// This is the same backend logic, formatted for Vercel Serverless Functions.
+// Helper function to get badge data from a product
+function getBadgeValue(product, badgeType, valueKey) {
+  if (!product?.badges?.length) return null;
+  const badge = product.badges.find(b => b.type === badgeType);
+  return badge ? badge[valueKey] : null;
+}
+
+// Main API handler function
 export default async function handler(request, response) {
   // Set CORS headers for all responses
   response.setHeader('Access-Control-Allow-Origin', '*');
@@ -34,23 +42,56 @@ export default async function handler(request, response) {
     
     const products = data.data.search.searchResultsData.products;
 
-    // Analysis functions are nested here for simplicity
-    const getBadgeValue = (product, badgeType, valueKey) => {
-        if (!product?.badges?.length) return null;
-        const badge = product.badges.find(b => b.type === badgeType);
-        return badge ? badge[valueKey] : null;
-    };
-    const analyzeKeywords = (prods) => { /* ... same logic ... */ };
-    
-    const analysisResult = { /* ... create the analysis object ... */ };
+    // --- Perform all analysis here on the backend ---
+    const topProduct = [...products].sort((a, b) => {
+        const salesA = getBadgeValue(a, 'BoughtXTimesInMonth', 'orderItemCount') || 0;
+        const salesB = getBadgeValue(b, 'BoughtXTimesInMonth', 'orderItemCount') || 0;
+        return salesB - salesA;
+      })[0] || null;
 
-    return response.status(200).json({
-        products: products,
-        // ... include analysis results ...
+    const keywordCounts = {};
+    products.forEach(product => {
+      if (product.keywords) {
+        product.keywords.split('+').forEach(kw => {
+          const term = kw.trim();
+          if (term) {
+            keywordCounts[term] = (keywordCounts[term] || 0) + 1;
+          }
+        });
+      }
     });
+    const keywordAnalysis = Object.entries(keywordCounts)
+      .map(([term, count]) => ({ term, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const storeData = {};
+    products.forEach(product => {
+      const storeName = product.storeName || 'Unknown Store';
+      if (!storeData[storeName]) {
+        storeData[storeName] = { name: storeName, productCount: 0, totalSales: 0, totalPrice: 0 };
+      }
+      storeData[storeName].productCount++;
+      storeData[storeName].totalPrice += product.price || 0;
+      storeData[storeName].totalSales += getBadgeValue(product, 'BoughtXTimesInMonth', 'orderItemCount') || 0;
+    });
+    const storeAnalysis = Object.values(storeData)
+      .map(store => ({ ...store, averagePrice: store.productCount > 0 ? store.totalPrice / store.productCount : 0 }))
+      .sort((a, b) => b.totalSales - a.totalSales);
+
+    // --- Construct the final payload for the front-end ---
+    const finalResponsePayload = {
+      products: products,
+      topProduct: topProduct,
+      analysis: {
+        keywords: keywordAnalysis,
+        stores: storeAnalysis,
+      },
+    };
+
+    return response.status(200).json(finalResponsePayload);
 
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('API Error:', error.message);
     return response.status(500).json({ error: error.message });
   }
 }
