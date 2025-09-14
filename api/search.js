@@ -1,5 +1,5 @@
-// This file should be at: /api/search.js
-// This is the COMPLETE version with all analysis logic included.
+// This file is at: /api/search.js
+// UPGRADED with Niche Saturation and Product Type Analysis.
 
 // Helper function to get badge data from a product
 function getBadgeValue(product, badgeType, valueKey) {
@@ -40,9 +40,11 @@ export default async function handler(request, response) {
       throw new Error('Invalid data structure from Zazzle API');
     }
     
-    const products = data.data.search.searchResultsData.products;
+    const searchResults = data.data.search.searchResultsData;
+    const products = searchResults.products;
 
     // --- Perform all analysis here on the backend ---
+
     const topProduct = [...products].sort((a, b) => {
         const salesA = getBadgeValue(a, 'BoughtXTimesInMonth', 'orderItemCount') || 0;
         const salesB = getBadgeValue(b, 'BoughtXTimesInMonth', 'orderItemCount') || 0;
@@ -77,6 +79,17 @@ export default async function handler(request, response) {
     const storeAnalysis = Object.values(storeData)
       .map(store => ({ ...store, averagePrice: store.productCount > 0 ? store.totalPrice / store.productCount : 0 }))
       .sort((a, b) => b.totalSales - a.totalSales);
+      
+    // ** NEW: Analyze Product Types **
+    const productTypeCounts = {};
+    products.forEach(product => {
+        if (product.productType) {
+            productTypeCounts[product.productType] = (productTypeCounts[product.productType] || 0) + 1;
+        }
+    });
+    const productTypeAnalysis = Object.entries(productTypeCounts)
+        .map(([type, count]) => ({ type, count }))
+        .sort((a, b) => b.count - a.count);
 
     // --- Construct the final payload for the front-end ---
     const finalResponsePayload = {
@@ -85,6 +98,10 @@ export default async function handler(request, response) {
       analysis: {
         keywords: keywordAnalysis,
         stores: storeAnalysis,
+        productTypes: productTypeAnalysis, // ** NEW DATA **
+      },
+      market: {
+        saturation: searchResults.numRecs || 0, // ** NEW DATA **
       },
     };
 
